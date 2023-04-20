@@ -7,6 +7,7 @@
 
 #include "xlibman.h"
 
+struct list_head g_xlibman_all_module_list = {0};
 
 // 申请一个xlibman_module_t结构
 void *xlibman_alloc()
@@ -106,7 +107,7 @@ out:
 struct xlibman_module_t test_module[10] = {0};
 // 是否已经过滤
 int is_filtered = 0;
-struct list_head all_module_list = {0};
+
 
 // 锚点
 int xlibman_hook(_in enum xlibman_position_t position)
@@ -114,17 +115,32 @@ int xlibman_hook(_in enum xlibman_position_t position)
     int ret = 0;
 
     if (is_filtered == 0) {
-        // 遍历all_module_list,将其中模块position和position相同的模块添加到test_module数组中
+        // 遍历g_xlibman_all_module_list,将其中模块position和position相同的模块添加到test_module数组中
         struct list_head *pos = NULL;
         struct xlibman_module_t *module = NULL;
         int i = 0;
-        list_for_each(pos, &all_module_list) {
+        list_for_each(pos, &g_xlibman_all_module_list) {
             module = list_entry(pos, struct xlibman_module_t, list);
             if (module->position == position) {
                 test_module[i] = *module;
                 i++;
             }
         }
+
+        // 根据module中的weight，将test_module数组中的模块按照weight从大到小排序
+        int j = 0;
+        struct xlibman_module_t tmp;
+        for (i = 0; i < 10 - 1; i++) {
+            for (j = 0; j < 10 - 1 - i; j++) {
+                if (test_module[j].weight < test_module[j + 1].weight) {
+                    tmp = test_module[j];
+                    test_module[j] = test_module[j + 1];
+                    test_module[j + 1] = tmp;
+                }
+            }
+        }
+
+
         is_filtered = 1;
 
     } else {
@@ -138,21 +154,47 @@ int xlibman_hook(_in enum xlibman_position_t position)
     int i = 0;
     for (i = 0; i < 10; i++) {
         if (test_module[i].position == position) {
-            callback = (xlibman_plug_comm_callback_t)test_module[i].callback.c.plug_comm_callback;
-            int pre_num = test_module[i].pre_num;
-            int post_num = test_module[i].post_num;
-            int j = 0;
-            for (j = 0; j < pre_num; j++) {
-                ext_callback = (xlibman_func_ext_callback_t)test_module[i].pre_array[j].module->callback.func_ext_callback;
-                ext_callback(NULL, NULL, NULL);
-            }
-            callback(NULL, NULL, NULL);
-            for (j = 0; j < post_num; j++) {
-                ext_callback = (xlibman_func_ext_callback_t)test_module[i].post_array[j].module->callback.func_ext_callback;
+            if (test_module[i].type == XLIBMAN_PLUG_TYPE2) {
+
+                callback = (xlibman_plug_comm_callback_t)test_module[i].callback.c.plug_comm_callback;
+                int pre_num = test_module[i].pre_num;
+                int post_num = test_module[i].post_num;
+                int j = 0;
+                for (j = 0; j < pre_num; j++) {
+                    ext_callback = (xlibman_func_ext_callback_t)test_module[i].pre_array[j].module->callback.func_ext_callback;
+                    ext_callback(NULL, NULL, NULL);
+                }
+                callback(NULL, NULL, NULL);
+                for (j = 0; j < post_num; j++) {
+                    ext_callback = (xlibman_func_ext_callback_t)test_module[i].post_array[j].module->callback.func_ext_callback;
+                    ext_callback(NULL, NULL, NULL);
+                }
+            } else if (test_module[i].type == XLIBMAN_PLUG_TYPE1) {
+                ext_callback = (xlibman_func_ext_callback_t)test_module[i].callback.func_ext_callback;
                 ext_callback(NULL, NULL, NULL);
             }
         }
     }
+
+    return ret;
+}
+
+// xlibman init
+int xlibman_init()
+{
+    // 初始化g_xlibman_all_module_list
+    INIT_LIST_HEAD(&g_xlibman_all_module_list);
+
+    return 0;
+}
+
+// xlibman 添加一个模块
+int xlibman_add_module(_in struct xlibman_module_t *module)
+{
+    int ret = 0;
+
+    // 将module添加到g_xlibman_all_module_list中
+    list_add_tail(&module->list, &g_xlibman_all_module_list);
 
     return ret;
 }
@@ -185,26 +227,69 @@ int plug_comm_callback(_in void *param1, _in void *param2, _in void *param3)
     return ret;
 }
 
+int plug_comm_callback2(_in void *param1, _in void *param2, _in void *param3)
+{
+    int ret = 0;
+
+    printf("plug_comm_callback2\n");
+
+    return ret;
+}
+
+int ext_callback3(_in void *param1, _in void *param2, _in void *param3)
+{
+    int ret = 0;
+
+    printf("ext_callback3\n");
+
+    return ret;
+}
+
 int main(int argc, char *argv[])
 {
     int ret = 0;
 
     struct xlibman_module_t ext_module1 = {0};
+    ext_module1.type = XLIBMAN_PLUG_TYPE1;
     ext_module1.position = 0;
     ext_module1.callback.func_ext_callback = (void *)ext_callback1;
 
     struct xlibman_module_t ext_module2 = {0};
+    ext_module2.type = XLIBMAN_PLUG_TYPE1;
     ext_module2.position = 0;
     ext_module2.callback.func_ext_callback = (void *)ext_callback2;
 
+    struct xlibman_module_t ext_module3 = {0};
+    ext_module3.type = XLIBMAN_PLUG_TYPE1;
+    ext_module3.position = 1;
+    ext_module3.weight = 30;
+    ext_module3.callback.func_ext_callback = (void *)ext_callback3;
+
     struct xlibman_module_t plug_comm_module = {0};
+    plug_comm_module.type = XLIBMAN_PLUG_TYPE2;
     plug_comm_module.position = 1;
+    plug_comm_module.weight = 10;
     plug_comm_module.callback.c.plug_comm_callback = (void *)plug_comm_callback;
 
-    INIT_LIST_HEAD(&all_module_list);
-    list_add(&ext_module1.list, &all_module_list);
-    list_add(&ext_module2.list, &all_module_list);
-    list_add(&plug_comm_module.list, &all_module_list);
+    struct xlibman_module_t plug_comm_module2 = {0};
+    plug_comm_module2.type = XLIBMAN_PLUG_TYPE2;
+    plug_comm_module2.position = 1;
+    plug_comm_module2.weight = 20;
+    plug_comm_module2.callback.c.plug_comm_callback = (void *)plug_comm_callback2;
+
+    // INIT_LIST_HEAD(&g_xlibman_all_module_list);
+    // list_add(&ext_module1.list, &g_xlibman_all_module_list);
+    // list_add(&ext_module2.list, &g_xlibman_all_module_list);
+    // list_add(&plug_comm_module.list, &g_xlibman_all_module_list);
+    // list_add(&plug_comm_module2.list, &g_xlibman_all_module_list);
+
+    xlibman_init();
+
+    xlibman_add_module(&ext_module1);
+    xlibman_add_module(&ext_module2);
+    xlibman_add_module(&ext_module3);
+    xlibman_add_module(&plug_comm_module);
+    xlibman_add_module(&plug_comm_module2);
 
 
     xlibman_add_pre_module(&plug_comm_module, &ext_module1, 10);

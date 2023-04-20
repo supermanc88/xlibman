@@ -64,6 +64,9 @@ struct xlibman_module_t {
         } c;
     } callback;
 
+    // 这里的权重是批在hook位置时，会根据权重进行排序，从大到小执行顺序
+    int weight;                         // module weight
+
     // 这里的pre和post是指在模块执行时，会根据结构中的weight权重进行排序，从大到小执行顺序
     int pre_num;                        // number of pre modules 前置模块数量
     struct xlibman_pre_or_post_module_t pre_array[MAX_PRE_POST_MODULE_NUM];          // list of pre modules 前置模块列表
@@ -87,6 +90,12 @@ int xlibman_add_post_module(_in struct xlibman_module_t *module, _in struct xlib
 
 // 锚点
 int xlibman_hook(_in enum xlibman_position_t position);
+
+// xlibman init
+int xlibman_init();
+
+// xlibman 添加一个模块
+int xlibman_add_module(_in struct xlibman_module_t *module);
 
 
 #endif /* XLIBMAN */
