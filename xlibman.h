@@ -6,6 +6,7 @@
 #define _in
 #define _out
 #define MAX_PRE_POST_MODULE_NUM 20
+#define MAX_POSITION_MODULE_NUM 20
 
 struct xlibman_module_t;
 
@@ -14,13 +15,15 @@ struct xlibman_module_t;
 #define XLIBMAN_MODULE_INIT_FUNC_NAME "xlibman_module_init"
 #define XLIBMAN_MODULE_UNINIT_FUNC_NAME "xlibman_module_uninit"
 
-typedef int (*xlibman_init_t)(_in _out struct xlibman_module_t **module, _in _out int *module_num);
+// 插件需要实现的初始化函数，框架在加载插件时，会调用该函数
+typedef int (*xlibman_init_t)(_in _out void *args);
 
-typedef int (*xlibman_uninit_t)(_in _out struct xlibman_module_t **module, _in int module_num);
+// 插件需要实现的反初始化函数，框架在卸载插件时，会调用该函数
+typedef int (*xlibman_uninit_t)(_in _out void *args);
 
-typedef int (*xlibman_func_ext_callback_t)(_in void *in_data, _out void *out_data, _in _out void *module_data);
+typedef int (*xlibman_func_ext_callback_t)(_in void *in_data, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
 
-typedef int (*xlibman_plug_comm_callback_t)(_in void *in_data, _out void *out_data, _in _out void *module_data);
+typedef int (*xlibman_plug_comm_callback_t)(_in void *in_data, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
 
 
 // 锚点位置，需要添加新的锚点时，在这里添加
@@ -30,7 +33,6 @@ enum xlibman_position_t {
     XLIBMAN_POSITION_HEAD,
     XLIBMAN_POSITION_TAIL,
 };
-
 
 // 模块类型
 enum xlibman_type_t {
@@ -76,11 +78,23 @@ struct xlibman_module_t {
     void *exts;                         // 后续需要扩展时留的指针
 };
 
+
+struct xlibman_position_store_t {
+    struct list_head list;                  // list of position store
+    enum xlibman_position_t position;       // position
+    int module_num;                         // module number
+    struct xlibman_module_t modules[MAX_POSITION_MODULE_NUM];     // module
+    int is_sorted;                          // is sorted
+};
+
 // 申请一个xlibman_module_t结构
 void *xlibman_alloc();
 
 // 释放一个xlibman_module_t结构
 void xlibman_free(_in struct xlibman_module_t *module);
+
+// xlibman 添加一个模块
+int xlibman_add_module(_in struct xlibman_module_t *module);
 
 // 添加一个前置模块
 int xlibman_add_pre_module(_in struct xlibman_module_t *module, _in struct xlibman_module_t *pre_module, _in int weight);
@@ -89,13 +103,12 @@ int xlibman_add_pre_module(_in struct xlibman_module_t *module, _in struct xlibm
 int xlibman_add_post_module(_in struct xlibman_module_t *module, _in struct xlibman_module_t *post_module, _in int weight);
 
 // 锚点
-int xlibman_hook(_in enum xlibman_position_t position);
+int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _out void **out_data, _in _out int *out_len);
 
-// xlibman init
+int xlibman_hook_via_request_type(_in char *request_type, _in void *in_data, _out void **out_data, _in _out int *out_len);
+
+// xlibman init，此函数由框架调用
 int xlibman_init();
-
-// xlibman 添加一个模块
-int xlibman_add_module(_in struct xlibman_module_t *module);
 
 
 #endif /* XLIBMAN */

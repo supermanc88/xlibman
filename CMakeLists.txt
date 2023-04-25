@@ -5,3 +5,5 @@ set(CMAKE_C_STANDARD 99)
 
 set(SOURCE_FILES xlibman.c)
 add_executable(xlibman ${SOURCE_FILES})
+
+add_subdirectory(demo)
