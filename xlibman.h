@@ -26,13 +26,30 @@ typedef int (*xlibman_func_ext_callback_t)(_in void *in_data, _out void **out_da
 typedef int (*xlibman_plug_comm_callback_t)(_in void *in_data, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
 
 
-// 锚点位置，需要添加新的锚点时，在这里添加
+// 锚点位置，预置10个位置，不够再添加
 enum xlibman_position_t {
     // 一般功能扩展插件都是没有锚点的
-    XLIBMAN_POSITION_NONE = 0,
-    XLIBMAN_POSITION_HEAD,
-    XLIBMAN_POSITION_TAIL,
+    XLIBMAN_POSITION_ANYWHERE0 = 0,
+    XLIBMAN_POSITION_ANYWHERE1,
+    XLIBMAN_POSITION_ANYWHERE2,
+    XLIBMAN_POSITION_ANYWHERE3,
+    XLIBMAN_POSITION_ANYWHERE4,
+    XLIBMAN_POSITION_ANYWHERE5,
+    XLIBMAN_POSITION_ANYWHERE6,
+    XLIBMAN_POSITION_ANYWHERE7,
+    XLIBMAN_POSITION_ANYWHERE8,
+    XLIBMAN_POSITION_ANYWHERE9,
 };
+
+// 模块回调函数执行方式
+// PROCESS_CALLBACK_ONLY_SELF: 只执行自己的回调函数，不执行pre_list和post_list中的模块
+#define PROCESS_CALLBACK_ONLY_SELF          1
+// PROCESS_CALLBACK_PRE_SELF_POST: 先执行pre_list中的模块，然后执行自己的回调函数，最后执行post_list中的模块
+#define PROCESS_CALLBACK_PRE_SELF_POST      2
+// PROCESS_CALLBACK_PRE_SELF: 先执行pre_list中的模块，然后执行自己的回调函数，不执行post_list中的模块
+#define PROCESS_CALLBACK_PRE_SELF           3
+// PROCESS_CALLBACK_SELF_POST: 先执行自己的回调函数，然后执行post_list中的模块，不执行pre_list中的模块
+#define PROCESS_CALLBACK_SELF_POST          4
 
 // 模块类型
 enum xlibman_type_t {
@@ -50,14 +67,20 @@ struct xlibman_pre_or_post_module_t {
 };
 
 struct xlibman_module_t {
-    struct list_head list;                  // list of modules 所有模块的链表
-    char name[64];                          // module name
-    char path[256];                         // module path
-    enum xlibman_position_t position;            // module position，这里用作锚点位置
-    struct list_head position_list;         // list of modules with same position  有相同锚点的模块的链表
-    struct list_head module_list;           // list of modules with same name  有相同名称的模块的链表，同一个库中可能有多个模块
+    struct list_head list;                          // 用于链接到所有模块的链表
+    char name[64];                                  // module name，暂未使用
+    char path[256];                                 // module path，暂未使用
+    enum xlibman_position_t position;               // module position，这里用作锚点位置编号，表示模块插入到哪个锚点位置
+    struct list_head position_list;                 // list of modules with same position  有相同锚点的模块的链表,deprecated
+    struct list_head module_list;                   // list of modules with same name  有相同名称的模块的链表，同一个库中可能有多个模块,deprecated
+    char alias[64];                                 // module alias，暂未使用
 
-    enum xlibman_type_t type;                    // module type
+    // module type，可选值为1、2
+    // 1表示普通插件
+    // 2表示拥有前置或后置插件的插件
+    // type1类型插件，在执行时，只执行回调函数，不会执行pre_array和post_array中的模块
+    // type2类型插件，在执行时，会执行pre_array中的模块，然后执行回调函数，最后执行post_array中的模块
+    enum xlibman_type_t type;
     union {
         xlibman_func_ext_callback_t func_ext_callback;          // module callback function
         struct {
@@ -106,6 +129,12 @@ int xlibman_add_post_module(_in struct xlibman_module_t *module, _in struct xlib
 int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _out void **out_data, _in _out int *out_len);
 
 int xlibman_hook_via_request_type(_in char *request_type, _in void *in_data, _out void **out_data, _in _out int *out_len);
+
+// 通过别名获取模块
+int xlibman_get_any_module(_in char *alias, _out struct xlibman_module_t **module);
+
+// 获取锚点位置的模块的执行结果
+int xlibman_get_any_position_result(_in enum xlibman_position_t position, _in _out void **out_data, _in _out int *out_len);
 
 // xlibman init，此函数由框架调用
 int xlibman_init();

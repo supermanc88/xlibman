@@ -107,7 +107,7 @@ out:
 
 //struct xlibman_module_t test_module[10] = {0};
 // 是否已经过滤
-int is_filtered = 0;
+//int is_filtered = 0;
 
 
 // 锚点
@@ -154,7 +154,7 @@ int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _out v
     int module_out_len = 0;
     // 遍历test_module数组，执行其中的回调函数
     int i = 0;
-    for (i = 0; i < 10; i++) {
+    for (i = 0; i < MAX_POSITION_MODULE_NUM; i++) {
         if (position_store->modules[i].position == position) {
             if (position_store->modules[i].type == XLIBMAN_PLUG_TYPE2) {
 
