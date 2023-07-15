@@ -8,6 +8,12 @@
 #define MAX_PRE_POST_MODULE_NUM 20
 #define MAX_POSITION_MODULE_NUM 20
 
+
+#define RET_SUCCESSED       0
+#define RET_FAILED          -1
+#define RET_CONTINUE        0
+#define RET_SUSPEND         1
+
 struct xlibman_module_t;
 
 // 初始化函数，用来填充xlibman_module_t结构，如果一个库中有多个模块，如何注册多个模块呢？
@@ -21,9 +27,7 @@ typedef int (*xlibman_init_t)(_in _out void *args);
 // 插件需要实现的反初始化函数，框架在卸载插件时，会调用该函数
 typedef int (*xlibman_uninit_t)(_in _out void *args);
 
-typedef int (*xlibman_func_ext_callback_t)(_in void *in_data, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
-
-typedef int (*xlibman_plug_comm_callback_t)(_in void *in_data, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
+typedef int (*xlibman_func_comm_callback_t)(_in void *in_data, _in int in_len, _out void **out_data, _in _out int *out_len, _in _out void *module_data);
 
 
 // 锚点位置，预置10个位置，不够再添加
@@ -41,7 +45,7 @@ enum xlibman_position_t {
     XLIBMAN_POSITION_ANYWHERE9,
 };
 
-// 模块回调函数执行方式
+// 模块回调函数执行方式，保留记录，暂时不用
 // PROCESS_CALLBACK_ONLY_SELF: 只执行自己的回调函数，不执行pre_list和post_list中的模块
 #define PROCESS_CALLBACK_ONLY_SELF          1
 // PROCESS_CALLBACK_PRE_SELF_POST: 先执行pre_list中的模块，然后执行自己的回调函数，最后执行post_list中的模块
@@ -54,9 +58,11 @@ enum xlibman_position_t {
 // 模块类型
 enum xlibman_type_t {
     // type1类型插件，在执行时，只执行回调函数，不会执行pre_array和post_array中的模块
-    XLIBMAN_PLUG_TYPE1 = 1,
+    XLIBMAN_MODULE_TYPE1 = 1,
     // type2类型插件，在执行时，会执行pre_array中的模块，然后执行回调函数，最后执行post_array中的模块
-    XLIBMAN_PLUG_TYPE2,
+    XLIBMAN_MODULE_TYPE2,
+    // type3类型插件为按需调用模块，在此类型插件中，需要在回调函数中分配好调用规则，然后调用对应的模块，保留记录，暂时不用
+    XLIBMAN_PLUG_TYPE3,
 };
 
 struct xlibman_pre_or_post_module_t {
@@ -81,13 +87,12 @@ struct xlibman_module_t {
     // type1类型插件，在执行时，只执行回调函数，不会执行pre_array和post_array中的模块
     // type2类型插件，在执行时，会执行pre_array中的模块，然后执行回调函数，最后执行post_array中的模块
     enum xlibman_type_t type;
-    union {
-        xlibman_func_ext_callback_t func_ext_callback;          // module callback function
-        struct {
-            char request_type[64];                              // request type
-            xlibman_plug_comm_callback_t plug_comm_callback;    // module callback function
-        } c;
-    } callback;
+    void *module_in_data;                           // module input data
+    int module_in_len;                              // module input data length
+    void *module_out_data;                          // module output data
+    int module_out_len;                             // module output data length
+
+    xlibman_func_comm_callback_t func_comm_callback;          // module callback function
 
     // 这里的权重是批在hook位置时，会根据权重进行排序，从大到小执行顺序
     int weight;                         // module weight
@@ -106,7 +111,7 @@ struct xlibman_position_store_t {
     struct list_head list;                  // list of position store
     enum xlibman_position_t position;       // position
     int module_num;                         // module number
-    struct xlibman_module_t modules[MAX_POSITION_MODULE_NUM];     // module
+    struct xlibman_module_t *modules[MAX_POSITION_MODULE_NUM];     // module
     int is_sorted;                          // is sorted
 };
 
@@ -126,9 +131,9 @@ int xlibman_add_pre_module(_in struct xlibman_module_t *module, _in struct xlibm
 int xlibman_add_post_module(_in struct xlibman_module_t *module, _in struct xlibman_module_t *post_module, _in int weight);
 
 // 锚点
-int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _out void **out_data, _in _out int *out_len);
+int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _in int in_len, _out void **out_data, _in _out int *out_len);
 
-int xlibman_hook_via_request_type(_in char *request_type, _in void *in_data, _out void **out_data, _in _out int *out_len);
+int xlibman_hook_via_alias(_in char *alias, _in void *in_data, _in int in_len, _out void **out_data, _in _out int *out_len);
 
 // 通过别名获取模块
 int xlibman_get_any_module(_in char *alias, _out struct xlibman_module_t **module);

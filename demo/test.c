@@ -33,9 +33,9 @@ int main(int argc, char *argv[])
     login_auth_module->callback.func_ext_callback = login_auth_module_callback_t;
     ext_module->callback.func_ext_callback = ext_callback_t;
 
-    parse_json_module->type = XLIBMAN_PLUG_TYPE1;
-    login_auth_module->type = XLIBMAN_PLUG_TYPE1;
-    ext_module->type = XLIBMAN_PLUG_TYPE1;
+    parse_json_module->type = XLIBMAN_MODULE_TYPE1;
+    login_auth_module->type = XLIBMAN_MODULE_TYPE1;
+    ext_module->type = XLIBMAN_MODULE_TYPE1;
 
     parse_json_module->weight = 2;
     login_auth_module->weight = 1;
