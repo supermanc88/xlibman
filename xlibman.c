@@ -6,6 +6,59 @@
 #include <fcntl.h>
 
 #include "xlibman.h"
+#include "list_helper.h"
+
+
+struct xlibman_pre_or_post_module_t {
+    // 在执行时，会根据module中的type和callback进行判断，然后执行对应的回调函数
+    // 这里直接执行回调，不会去执行pre_list和post_list中的模块
+    struct xlibman_module_t *module;        // module
+    int weight;                             // module weight
+};
+
+struct xlibman_module_t {
+    struct list_head list;                          // 用于链接到所有模块的链表
+    char name[64];                                  // module name，暂未使用
+    char path[256];                                 // module path，暂未使用
+    enum xlibman_position_t position;               // module position，这里用作锚点位置编号，表示模块插入到哪个锚点位置
+    struct list_head position_list;                 // list of modules with same position  有相同锚点的模块的链表,deprecated
+    struct list_head module_list;                   // list of modules with same name  有相同名称的模块的链表，同一个库中可能有多个模块,deprecated
+    char alias[64];                                 // module alias，暂未使用
+
+    // module type，可选值为1、2
+    // 1表示普通插件
+    // 2表示拥有前置或后置插件的插件
+    // type1类型插件，在执行时，只执行回调函数，不会执行pre_array和post_array中的模块
+    // type2类型插件，在执行时，会执行pre_array中的模块，然后执行回调函数，最后执行post_array中的模块
+    enum xlibman_type_t type;
+    void *module_in_args;                           // module input data
+    int module_in_len;                              // module input data length
+    void *module_out_args;                          // module output data
+    int module_out_len;                             // module output data length
+
+    xlibman_func_comm_callback_t func_comm_callback;          // module callback function
+
+    // 这里的权重是批在hook位置时，会根据权重进行排序，从大到小执行顺序
+    int weight;                         // module weight
+
+    // 这里的pre和post是指在模块执行时，会根据结构中的weight权重进行排序，从大到小执行顺序
+    int pre_num;                        // number of pre modules 前置模块数量
+    struct xlibman_pre_or_post_module_t pre_array[MAX_PRE_POST_MODULE_NUM];          // list of pre modules 前置模块列表
+    int post_num;                       // number of post modules 后置模块数量
+    struct xlibman_pre_or_post_module_t post_array[MAX_PRE_POST_MODULE_NUM];         // list of post modules 后置模块列表
+    void *data;                         // module data  模块数据，由模块内部自己申请空间，在模块卸载时释放
+    void *exts;                         // 后续需要扩展时留的指针
+};
+
+
+struct xlibman_position_store_t {
+    struct list_head list;                  // list of position store
+    enum xlibman_position_t position;       // position
+    int module_num;                         // module number
+    struct xlibman_module_t *modules[MAX_POSITION_MODULE_NUM];     // module
+    int is_sorted;                          // is sorted
+};
+
 
 struct list_head g_xlibman_all_module_list = {0};
 struct list_head g_xlibman_position_store_list = {0};
@@ -23,7 +76,7 @@ int xlibman_record_output_args(_in struct xlibman_module_t *module, _in void *ou
                                 free(*module_out_data);                                                                                     \
                                 *module_out_data = NULL;                                                                                    \
                             }                                                                                                               \
-                            module_in_data = module->module_out_data;                                                                       \
+                            module_in_data = module->module_out_args;                                                                       \
                             module_in_len = module->module_out_len;                                                                         \
                         }
 
@@ -44,7 +97,68 @@ void xlibman_free(_in struct xlibman_module_t *module)
     if (module == NULL) {
         return;
     }
+    if (module->module_in_args != NULL) {
+        free(module->module_in_args);
+        module->module_in_args = NULL;
+        module->module_in_len = 0;
+    }
+    if (module->module_out_args != NULL) {
+        free(module->module_out_args);
+        module->module_out_args = NULL;
+        module->module_out_len = 0;
+    }
     free(module);
+}
+
+void xlibman_set_module_type(_in struct xlibman_module_t *module, _in enum xlibman_type_t type)
+{
+    if (module == NULL) {
+        return;
+    }
+    module->type = type;
+}
+
+void xlibman_set_module_position(_in struct xlibman_module_t *module, _in enum xlibman_position_t position)
+{
+    if (module == NULL) {
+        return;
+    }
+    module->position = position;
+}
+
+void xlibman_set_module_weight(_in struct xlibman_module_t *module, _in int weight)
+{
+    if (module == NULL) {
+        return;
+    }
+    module->weight = weight;
+}
+
+void xlibman_set_module_func(_in struct xlibman_module_t *module, _in xlibman_func_comm_callback_t func)
+{
+    if (module == NULL) {
+        return;
+    }
+    module->func_comm_callback = func;
+}
+
+
+// 释放一个xlibman_module_t结构中记录参数的内存
+void xlibman_free_module_args(_in struct xlibman_module_t *module)
+{
+    if (module == NULL) {
+        return;
+    }
+    if (module->module_in_args != NULL) {
+        free(module->module_in_args);
+        module->module_in_args = NULL;
+        module->module_in_len = 0;
+    }
+    if (module->module_out_args != NULL) {
+        free(module->module_out_args);
+        module->module_out_args = NULL;
+        module->module_out_len = 0;
+    }
 }
 
 // 添加一个前置模块，将pre_module添加到module的前置模块列表pre_array数组中，并将weight设置为权重，再按照weight从大到小排序
@@ -121,11 +235,6 @@ out:
     return ret;
 }
 
-//struct xlibman_module_t test_module[10] = {0};
-// 是否已经过滤
-//int is_filtered = 0;
-
-
 // 锚点
 int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _in int in_len, _out void **out_data, _in _out int *out_len)
 {
@@ -171,7 +280,7 @@ int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _in in
     // 遍历test_module数组，执行其中的回调函数
     int i = 0;
     int callback_ret = 0;
-    for (i = 0; i < MAX_POSITION_MODULE_NUM; i++) {
+    for (i = 0; i < position_store->module_num; i++) {
         if (position_store->modules[i]->position == position) {
             if (position_store->modules[i]->type == XLIBMAN_MODULE_TYPE2) {
                 do {
@@ -186,22 +295,30 @@ int xlibman_hook(_in enum xlibman_position_t position, _in void *in_data, _in in
                         struct xlibman_module_t *pre_module = NULL;
                         pre_module = position_store->modules[i]->pre_array[j].module;
                         ext_callback = (xlibman_func_comm_callback_t)pre_module->func_comm_callback;
+                        if (ext_callback == NULL) {
+                            continue;
+                        }
                         PROCESS_CALLBACK_AND_RECORD_ARGS(pre_module, ext_callback);
-                        if (callback_ret == RET_SUSPEND) {
+                        if (callback_ret == XLIBMAN_RET_SUSPEND) {
                             break;
                         }
                     }
-                    PROCESS_CALLBACK_AND_RECORD_ARGS(module, callback);
-                    if (callback_ret == RET_SUSPEND) {
-                        break;
+                    if (callback != NULL) {
+                        PROCESS_CALLBACK_AND_RECORD_ARGS(module, callback);
+                        if (callback_ret == XLIBMAN_RET_SUSPEND) {
+                            break;
+                        }
                     }
                     for (j = 0; j < post_num; j++) {
                         xlibman_func_comm_callback_t ext_callback = NULL;
                         struct xlibman_module_t *post_module = NULL;
                         post_module = position_store->modules[i]->post_array[j].module;
                         ext_callback = (xlibman_func_comm_callback_t)post_module->func_comm_callback;
+                        if (ext_callback == NULL) {
+                            continue;
+                        }
                         PROCESS_CALLBACK_AND_RECORD_ARGS(post_module, ext_callback);
-                        if (callback_ret == RET_SUSPEND) {
+                        if (callback_ret == XLIBMAN_RET_SUSPEND) {
                             break;
                         }
                     }
@@ -268,22 +385,30 @@ int xlibman_hook_via_alias(_in char *alias, _in void *in_data, _in int in_len, _
                 struct xlibman_module_t *pre_module = NULL;
                 pre_module = module->pre_array[j].module;
                 ext_callback = (xlibman_func_comm_callback_t)pre_module->func_comm_callback;
+                if (ext_callback == NULL) {
+                    continue;
+                }
                 PROCESS_CALLBACK_AND_RECORD_ARGS(pre_module, ext_callback);
-                if (callback_ret == RET_SUSPEND) {
+                if (callback_ret == XLIBMAN_RET_SUSPEND) {
                     break;
                 }
             }
-            PROCESS_CALLBACK_AND_RECORD_ARGS(module, callback);
-            if (callback_ret == RET_SUSPEND) {
-                break;
+            if (callback != NULL) {
+                PROCESS_CALLBACK_AND_RECORD_ARGS(module, callback);
+                if (callback_ret == XLIBMAN_RET_SUSPEND) {
+                    break;
+                }
             }
             for (j = 0; j < post_num; j++) {
                 xlibman_func_comm_callback_t ext_callback = NULL;
                 struct xlibman_module_t *post_module = NULL;
                 post_module = module->post_array[j].module;
                 ext_callback = (xlibman_func_comm_callback_t)post_module->func_comm_callback;
+                if (ext_callback == NULL) {
+                    continue;
+                }
                 PROCESS_CALLBACK_AND_RECORD_ARGS(post_module, ext_callback);
-                if (callback_ret == RET_SUSPEND) {
+                if (callback_ret == XLIBMAN_RET_SUSPEND) {
                     break;
                 }
             }
@@ -304,18 +429,18 @@ int xlibman_record_input_args(_in struct xlibman_module_t *module, _in void *in_
 {
     int ret = 0;
 
-    if (module->module_in_data != NULL) {
-        free(module->module_in_data);
-        module->module_in_data = NULL;
+    if (module->module_in_args != NULL) {
+        free(module->module_in_args);
+        module->module_in_args = NULL;
         module->module_in_len = 0;
     }
 
     if (in_len > 0) {
-        module->module_in_data = malloc(in_len);
-        memcpy(module->module_in_data, in_data, in_len);
+        module->module_in_args = malloc(in_len);
+        memcpy(module->module_in_args, in_data, in_len);
         module->module_in_len = in_len;
     } else {
-        module->module_in_data = NULL;
+        module->module_in_args = NULL;
         module->module_in_len = 0;
     }
 
@@ -326,18 +451,18 @@ int xlibman_record_output_args(_in struct xlibman_module_t *module, _in void *ou
 {
     int ret = 0;
 
-    if (module->module_out_data != NULL) {
-        free(module->module_out_data);
-        module->module_out_data = NULL;
+    if (module->module_out_args != NULL) {
+        free(module->module_out_args);
+        module->module_out_args = NULL;
         module->module_out_len = 0;
     }
 
     if (out_len > 0) {
-        module->module_out_data = malloc(out_len);
-        memcpy(module->module_out_data, out_data, out_len);
+        module->module_out_args = malloc(out_len);
+        memcpy(module->module_out_args, out_data, out_len);
         module->module_out_len = out_len;
     } else {
-        module->module_out_data = NULL;
+        module->module_out_args = NULL;
         module->module_out_len = 0;
     }
 
@@ -412,7 +537,7 @@ int xlibman_add_module(_in struct xlibman_module_t *module)
 
 #if 0
 
-int ext_callback1(_in void *param1, _in void **param2, _in int *out_len, _in void *param3)
+int ext_callback1(_in void *param1, _in int *in_len, _in void **param2, _in int *out_len, _in void *param3)
 {
     int ret = 0;
 
@@ -431,7 +556,7 @@ int ext_callback1(_in void *param1, _in void **param2, _in int *out_len, _in voi
     return ret;
 }
 
-int ext_callback2(_in void *param1, _in void **param2, _in int *out_len, _in void *param3)
+int ext_callback2(_in void *param1, _in int *in_len, _in void **param2, _in int *out_len, _in void *param3)
 {
     int ret = 0;
 
@@ -450,7 +575,7 @@ int ext_callback2(_in void *param1, _in void **param2, _in int *out_len, _in voi
     return ret;
 }
 
-int plug_comm_callback(_in void *param1, _in void **param2, _in int *out_len, _in void *param3)
+int plug_comm_callback(_in void *param1, _in int *in_len, _in void **param2, _in int *out_len, _in void *param3)
 {
     int ret = 0;
 
@@ -469,7 +594,7 @@ int plug_comm_callback(_in void *param1, _in void **param2, _in int *out_len, _i
     return ret;
 }
 
-int plug_comm_callback2(_in void *param1, _in void **param2, _in int *out_len, _in void *param3)
+int plug_comm_callback2(_in void *param1, _in int *in_len, _in void **param2, _in int *out_len, _in void *param3)
 {
     int ret = 0;
 
@@ -488,7 +613,7 @@ int plug_comm_callback2(_in void *param1, _in void **param2, _in int *out_len, _
     return ret;
 }
 
-int ext_callback3(_in void *param1, _in void **param2, _in int *out_len, _in void *param3)
+int ext_callback3(_in void *param1, _in int *in_len, _in void **param2, _in int *out_len, _in void *param3)
 {
     int ret = 0;
 
@@ -513,32 +638,32 @@ int main(int argc, char *argv[])
 
     struct xlibman_module_t *ext_module1 = (struct xlibman_module_t *)xlibman_alloc();
     ext_module1->type = XLIBMAN_MODULE_TYPE1;
-    ext_module1->position = 0;
-    ext_module1->callback.func_ext_callback = (void *)ext_callback1;
+    ext_module1->position = XLIBMAN_POSITION_ANYWHERE0;
+    ext_module1->func_comm_callback = (void *)ext_callback1;
 
     struct xlibman_module_t *ext_module2 = (struct xlibman_module_t *)xlibman_alloc();
     ext_module2->type = XLIBMAN_MODULE_TYPE1;
-    ext_module2->position = 0;
-    ext_module2->callback.func_ext_callback = (void *)ext_callback2;
+    ext_module2->position = XLIBMAN_POSITION_ANYWHERE0;
+    ext_module2->func_comm_callback = (void *)ext_callback2;
 
     struct xlibman_module_t *ext_module3 = (struct xlibman_module_t *)xlibman_alloc();
     ext_module3->type = XLIBMAN_MODULE_TYPE1;
-    ext_module3->position = 1;
+    ext_module3->position = XLIBMAN_POSITION_ANYWHERE1;
     ext_module3->weight = 30;
-    ext_module3->callback.func_ext_callback = (void *)ext_callback3;
+    ext_module3->func_comm_callback = (void *)ext_callback3;
 
     struct xlibman_module_t *plug_comm_module = (struct xlibman_module_t *)xlibman_alloc();
     plug_comm_module->type = XLIBMAN_MODULE_TYPE2;
-    plug_comm_module->position = 1;
+    plug_comm_module->position = XLIBMAN_POSITION_ANYWHERE1;
     plug_comm_module->weight = 10;
-    plug_comm_module->callback.c.plug_comm_callback = (void *)plug_comm_callback;
+    plug_comm_module->func_comm_callback = (void *)plug_comm_callback;
 
     struct xlibman_module_t *plug_comm_module2 = (struct xlibman_module_t *)xlibman_alloc();
     plug_comm_module2->type = XLIBMAN_MODULE_TYPE2;
-    plug_comm_module2->position = 0;
+    plug_comm_module2->position = XLIBMAN_POSITION_ANYWHERE0;
     plug_comm_module2->weight = 20;
-    strcpy(plug_comm_module2->callback.c.request_type, "request_type2");
-    plug_comm_module2->callback.c.plug_comm_callback = (void *)plug_comm_callback2;
+//    strcpy(plug_comm_module2->callback.c.request_type, "request_type2");
+    plug_comm_module2->func_comm_callback = (void *)plug_comm_callback2;
 
     // INIT_LIST_HEAD(&g_xlibman_all_module_list);
     // list_add(&ext_module1.list, &g_xlibman_all_module_list);
@@ -566,22 +691,15 @@ int main(int argc, char *argv[])
     int *out_data = NULL;
     int out_len = 0;
 
-    xlibman_hook(1, &in_data, &out_data, &out_len);
+    xlibman_hook(1, &in_data, sizeof(int), &out_data, &out_len);
 
     printf("out_data = %d\n", *out_data);
 
-    free(out_data);
+//    free(out_data);
 
     printf("Hello World\n");
 
 //    xlibman_hook(1, &in_data, &out_data, &out_len);
-
-    xlibman_hook_via_request_type("request_type2", &in_data, &out_data, &out_len);
-
-    printf("out_data = %d\n", *out_data);
-
-    free(out_data);
-
 
     xlibman_free(ext_module1);
     xlibman_free(ext_module2);
